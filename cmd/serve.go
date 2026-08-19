@@ -50,6 +50,22 @@ var serveCmd = &cobra.Command{
 			keysByProvider[key.Provider] = append(keysByProvider[key.Provider], key.Key)
 		}
 
+		// Collect custom-model endpoints and styles so custom providers
+		// (e.g. "alibaba") resolve to their stored endpoint instead of erroring.
+		type customProviderInfo struct {
+			Endpoint string
+			Style    string
+		}
+		customProviders := make(map[string]customProviderInfo)
+		for _, cm := range store.ListCustomModels() {
+			if _, exists := customProviders[cm.Provider]; !exists {
+				customProviders[cm.Provider] = customProviderInfo{
+					Endpoint: cm.Endpoint,
+					Style:    cm.Style,
+				}
+			}
+		}
+
 		providers := make([]api.Provider, 0, len(keysByProvider))
 		endpoints := map[string]string{
 			capacity.Gemini:     capacity.EndpointGemini,
@@ -61,12 +77,21 @@ var serveCmd = &cobra.Command{
 		}
 		for provider, keys := range keysByProvider {
 			endpoint, ok := endpoints[provider]
-			if !ok {
-				return fmt.Errorf("provider %q has no configured endpoint", provider)
-			}
 			style := api.StyleOpenAI
 			if provider == capacity.Gemini {
 				style = api.StyleGemini
+			}
+			if !ok {
+				// Not a built-in provider: fall back to a registered custom model.
+				info, customOk := customProviders[provider]
+				if !customOk {
+					return fmt.Errorf("provider %q has no configured endpoint", provider)
+				}
+				endpoint = info.Endpoint
+				style = info.Style
+				if style == "" {
+					style = api.StyleOpenAI
+				}
 			}
 			providers = append(providers, api.Provider{
 				Name:     provider,
@@ -85,6 +110,17 @@ var serveCmd = &cobra.Command{
 				Model:    model.Model,
 				Provider: model.Provider,
 				Priority: store.Priority(model.Provider, model.Model),
+			})
+		}
+		// Add custom models registered by the user.
+		for _, cm := range store.ListCustomModels() {
+			if store.IsPaused(cm.Provider, cm.Model) {
+				continue
+			}
+			models = append(models, api.ModelRoute{
+				Model:    cm.Model,
+				Provider: cm.Provider,
+				Priority: store.Priority(cm.Provider, cm.Model),
 			})
 		}
 
