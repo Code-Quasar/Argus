@@ -89,7 +89,7 @@ func TestGeminiRoute(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if response.Model != "argus" || response.Choices[0].Message.Content != "hello" {
+	if response.Model != "gemini-test" || response.Choices[0].Message.Content != "hello" {
 		t.Fatalf("response = %+v", response)
 	}
 }

@@ -141,7 +141,7 @@ func (s *Server) chatCompletions(writer http.ResponseWriter, request *http.Reque
 			response, _, err = s.callOpenAI(request, provider, key, internalInput)
 		}
 		if err == nil {
-			response.Model = ArgusModel
+			response.Model = route.Model
 			writeJSON(writer, http.StatusOK, response)
 			return
 		}
