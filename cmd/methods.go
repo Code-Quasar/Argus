@@ -1,22 +1,40 @@
 package cmd
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"sync"
 	"time"
+
+	"golang.org/x/crypto/argon2"
 )
+
+const (
+	storeVersion = 1
+	saltSize     = 16
+)
+
+type encryptedStore struct {
+	Version    int    `json:"version"`
+	Salt       []byte `json:"salt"`
+	Nonce      []byte `json:"nonce"`
+	Ciphertext []byte `json:"ciphertext"`
+}
 
 // Store wraps a JSON file on disk with an in-process mutex. Open it once
 // per command invocation, mutate, and it saves on every write — there's
 // no separate explicit Save() the caller needs to remember to call.
 type Store struct {
-	path string
-	mu   sync.Mutex
-	d    data
+	path     string
+	password string
+	mu       sync.Mutex
+	d        data
 }
 
 // OpenDefault opens the store used by all CLI commands.
@@ -25,54 +43,152 @@ func OpenDefault() (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return Open(path)
+
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		password, err := createPassword()
+		if err != nil {
+			return nil, err
+		}
+		s := &Store{path: path, password: password, d: emptyData()}
+		if err := s.saveWithPassword(password); err != nil {
+			return nil, err
+		}
+		return s, nil
+	} else if err != nil {
+		return nil, fmt.Errorf("check %s: %w", path, err)
+	}
+
+	password, err := readPassword("Password: ")
+	if err != nil {
+		return nil, err
+	}
+	return Open(path, password)
 }
 
-// Open loads the store from path, creating an empty one if the file
-// doesn't exist yet.
-func Open(path string) (*Store, error) {
-	s := &Store{path: path, d: emptyData()}
+// Open loads and decrypts the store from path.
+func Open(path, password string) (*Store, error) {
+	s := &Store{path: path, password: password, d: emptyData()}
 
 	raw, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		return s, nil // fresh store, nothing to load
-	}
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 
-	if err := json.Unmarshal(raw, &s.d); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
+	var envelope encryptedStore
+	if err := json.Unmarshal(raw, &envelope); err != nil || envelope.Version != storeVersion || len(envelope.Salt) != saltSize {
+		// Migrate the previous plaintext format after the user unlocks it.
+		if err := json.Unmarshal(raw, &s.d); err != nil {
+			return nil, fmt.Errorf("parse encrypted store: %w", err)
+		}
+		initializeData(&s.d)
+		if err := s.save(); err != nil {
+			return nil, fmt.Errorf("encrypt existing store: %w", err)
+		}
+		return s, nil
 	}
-	// Guard against nil maps if the file predates a field being added.
-	if s.d.Paused == nil {
-		s.d.Paused = make(map[string]bool)
+	plaintext, err := decrypt(envelope, password)
+	if err != nil {
+		return nil, fmt.Errorf("unlock store: incorrect password or damaged store")
 	}
-	if s.d.Priority == nil {
-		s.d.Priority = make(map[string]int)
+	if err := json.Unmarshal(plaintext, &s.d); err != nil {
+		return nil, fmt.Errorf("parse decrypted store: %w", err)
 	}
-	if s.d.Stats == nil {
-		s.d.Stats = make(map[string]map[string]int)
-	}
+	initializeData(&s.d)
 	return s, nil
+}
+
+func initializeData(value *data) {
+	if value.Paused == nil {
+		value.Paused = make(map[string]bool)
+	}
+	if value.Priority == nil {
+		value.Priority = make(map[string]int)
+	}
+	if value.Stats == nil {
+		value.Stats = make(map[string]map[string]int)
+	}
 }
 
 // save writes the store atomically: write to a temp file, then rename
 // over the real path, so a crash mid-write never leaves a corrupt file.
 func (s *Store) save() error {
-	raw, err := json.MarshalIndent(s.d, "", "  ")
+	return s.saveWithPassword(s.password)
+}
+
+func (s *Store) saveWithPassword(password string) error {
+	plaintext, err := json.Marshal(s.d)
 	if err != nil {
 		return fmt.Errorf("encode store: %w", err)
+	}
+
+	envelope, err := encrypt(plaintext, password)
+	if err != nil {
+		return err
+	}
+	raw, err := json.Marshal(envelope)
+	if err != nil {
+		return fmt.Errorf("encode encrypted store: %w", err)
 	}
 
 	tmp := s.path + ".tmp"
 	if err := os.WriteFile(tmp, raw, 0600); err != nil {
 		return fmt.Errorf("write temp file: %w", err)
 	}
+	defer os.Remove(tmp)
+	if err := os.Chmod(tmp, 0600); err != nil {
+		return fmt.Errorf("secure temp file: %w", err)
+	}
 	if err := os.Rename(tmp, s.path); err != nil {
 		return fmt.Errorf("replace store file: %w", err)
 	}
 	return nil
+}
+
+func deriveKey(password string, salt []byte) []byte {
+	return argon2.IDKey([]byte(password), salt, 1, 64*1024, 4, 32)
+}
+
+func encrypt(plaintext []byte, password string) (encryptedStore, error) {
+	salt := make([]byte, saltSize)
+	if _, err := io.ReadFull(rand.Reader, salt); err != nil {
+		return encryptedStore{}, fmt.Errorf("create store salt: %w", err)
+	}
+	block, err := aes.NewCipher(deriveKey(password, salt))
+	if err != nil {
+		return encryptedStore{}, fmt.Errorf("create store cipher: %w", err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return encryptedStore{}, fmt.Errorf("create store encryption: %w", err)
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return encryptedStore{}, fmt.Errorf("create store nonce: %w", err)
+	}
+	return encryptedStore{
+		Version:    storeVersion,
+		Salt:       salt,
+		Nonce:      nonce,
+		Ciphertext: gcm.Seal(nil, nonce, plaintext, nil),
+	}, nil
+}
+
+func decrypt(envelope encryptedStore, password string) ([]byte, error) {
+	if envelope.Version != storeVersion || len(envelope.Salt) != saltSize {
+		return nil, fmt.Errorf("unsupported encrypted store")
+	}
+	block, err := aes.NewCipher(deriveKey(password, envelope.Salt))
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	if len(envelope.Nonce) != gcm.NonceSize() {
+		return nil, fmt.Errorf("invalid store nonce")
+	}
+	return gcm.Open(nil, envelope.Nonce, envelope.Ciphertext, nil)
 }
 
 func scopeKey(provider, model string) string {
