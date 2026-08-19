@@ -372,3 +372,63 @@ func hasPrefix(s, prefix string) bool {
 func (s *Store) Path() string {
 	return s.path
 }
+
+// AddCustomModel stores a custom model configuration
+func (s *Store) AddCustomModel(model CustomModel) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Check if this provider+model combination already exists
+	for i, existing := range s.d.CustomModels {
+		if existing.Provider == model.Provider && existing.Model == model.Model {
+			// Update existing entry
+			s.d.CustomModels[i] = model
+			return s.save()
+		}
+	}
+
+	// Add new entry
+	s.d.CustomModels = append(s.d.CustomModels, model)
+	return s.save()
+}
+
+// ListCustomModels returns all configured custom models
+func (s *Store) ListCustomModels() []CustomModel {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	result := make([]CustomModel, len(s.d.CustomModels))
+	copy(result, s.d.CustomModels)
+	return result
+}
+
+// RemoveCustomModel removes a custom model by provider and model name
+func (s *Store) RemoveCustomModel(provider, modelName string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for i, existing := range s.d.CustomModels {
+		if existing.Provider == provider && existing.Model == modelName {
+			// Remove this entry
+			s.d.CustomModels = append(s.d.CustomModels[:i], s.d.CustomModels[i+1:]...)
+			return s.save()
+		}
+	}
+
+	return fmt.Errorf("custom model %s/%s not found", provider, modelName)
+}
+
+// GetCustomModel retrieves a specific custom model
+func (s *Store) GetCustomModel(provider, modelName string) (*CustomModel, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, existing := range s.d.CustomModels {
+		if existing.Provider == provider && existing.Model == modelName {
+			return &existing, nil
+		}
+	}
+
+	return nil, fmt.Errorf("custom model %s/%s not found", provider, modelName)
+}
+

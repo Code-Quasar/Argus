@@ -74,6 +74,8 @@ type data struct {
 	Priority map[string]int `json:"priority"`
 
 	Stats map[string]map[string]int `json:"stats"`
+
+	CustomModels []CustomModel `json:"custom_models,omitempty"`
 }
 
 func emptyData() data {
