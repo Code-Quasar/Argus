@@ -12,14 +12,22 @@ import (
 )
 
 func readPassword(prompt string) (string, error) {
+	password, err := readHidden(prompt)
+	if err != nil {
+		return "", err
+	}
+	if len(password) == 0 {
+		return "", errors.New("password cannot be empty")
+	}
+	return password, nil
+}
+
+func readHidden(prompt string) (string, error) {
 	fmt.Print(prompt)
 	password, err := term.ReadPassword(int(os.Stdin.Fd()))
 	fmt.Println()
 	if err != nil {
 		return "", fmt.Errorf("read password: %w", err)
-	}
-	if len(password) == 0 {
-		return "", errors.New("password cannot be empty")
 	}
 	return string(password), nil
 }
