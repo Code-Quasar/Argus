@@ -7,18 +7,44 @@ import (
 	"time"
 )
 
-// DefaultPath returns ~/.hydra/store.json, creating the ~/.hydra
+// DefaultPath returns ~/.argus/store.json, creating the ~/.argus
 // directory if it doesn't exist yet.
 func DefaultPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("resolve home directory: %w", err)
 	}
-	dir := filepath.Join(home, ".hydra")
+	dir := filepath.Join(home, ".argus")
+	legacyDir := filepath.Join(home, ".hydra")
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		if _, legacyErr := os.Stat(legacyDir); legacyErr == nil {
+			if err := os.Rename(legacyDir, dir); err != nil {
+				return "", fmt.Errorf("migrate %s to %s: %w", legacyDir, dir, err)
+			}
+		}
+	} else if err != nil {
+		return "", fmt.Errorf("check %s: %w", dir, err)
+	}
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return "", fmt.Errorf("create %s: %w", dir, err)
 	}
 	return filepath.Join(dir, "store.json"), nil
+}
+
+func DefaultPIDPath() (string, error) {
+	path, err := DefaultPath()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(filepath.Dir(path), "argus.pid"), nil
+}
+
+func DefaultLogPath() (string, error) {
+	path, err := DefaultPath()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(filepath.Dir(path), "argus.log"), nil
 }
 
 // ---------- Data shapes ----------

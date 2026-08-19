@@ -33,7 +33,7 @@ func TestOpenAICompatibleRoute(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"llama-test","messages":[{"role":"user","content":"hi"}]}`))
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"argus","messages":[{"role":"user","content":"hi"}]}`))
 	recorder := httptest.NewRecorder()
 	server.Routes().ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK {
@@ -72,7 +72,7 @@ func TestGeminiRoute(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gemini-test","messages":[{"role":"system","content":"be concise"},{"role":"user","content":"hi"}]}`))
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"argus","messages":[{"role":"system","content":"be concise"},{"role":"user","content":"hi"}]}`))
 	recorder := httptest.NewRecorder()
 	server.Routes().ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK {
@@ -89,7 +89,42 @@ func TestGeminiRoute(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if response.Model != "gemini-test" || response.Choices[0].Message.Content != "hello" {
+	if response.Model != "argus" || response.Choices[0].Message.Content != "hello" {
 		t.Fatalf("response = %+v", response)
+	}
+}
+
+func TestArgusRouteFallsBackToNextPriorityModel(t *testing.T) {
+	var attempts []string
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		body, _ := io.ReadAll(request.Body)
+		attempts = append(attempts, string(body))
+		if strings.Contains(string(body), `"model":"first"`) {
+			http.Error(writer, "rate limited", http.StatusTooManyRequests)
+			return
+		}
+		_, _ = writer.Write([]byte(`{"model":"second","choices":[{"index":0,"message":{"role":"assistant","content":"fallback"},"finish_reason":"stop"}]}`))
+	}))
+	defer upstream.Close()
+
+	server, err := New(Config{
+		Providers: []Provider{{Name: "groq", Endpoint: upstream.URL, Style: StyleOpenAI, Keys: []string{"key"}}},
+		Models: []ModelRoute{
+			{Model: "first", Provider: "groq", Priority: 0},
+			{Model: "second", Provider: "groq", Priority: 1},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"argus","messages":[{"role":"user","content":"hi"}]}`))
+	recorder := httptest.NewRecorder()
+	server.Routes().ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body)
+	}
+	if len(attempts) != 2 || !strings.Contains(attempts[0], `"model":"first"`) || !strings.Contains(attempts[1], `"model":"second"`) {
+		t.Fatalf("attempts = %v", attempts)
 	}
 }

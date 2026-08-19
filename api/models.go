@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +21,7 @@ import (
 const (
 	StyleOpenAI = "openai"
 	StyleGemini = "gemini"
+	ArgusModel  = "argus"
 )
 
 type Provider struct {
@@ -32,6 +34,7 @@ type Provider struct {
 type ModelRoute struct {
 	Model    string
 	Provider string
+	Priority int
 }
 
 type Config struct {
@@ -42,20 +45,16 @@ type Config struct {
 
 type Server struct {
 	providers map[string]Provider
-	models    map[string]string
+	models    []ModelRoute
 	client    *http.Client
 	mu        sync.Mutex
 	keyIndex  map[string]int
 }
 
 func New(config Config) (*Server, error) {
-	if len(config.Providers) == 0 {
-		return nil, errors.New("api: no providers configured")
-	}
-
 	server := &Server{
 		providers: make(map[string]Provider),
-		models:    make(map[string]string),
+		models:    make([]ModelRoute, 0, len(config.Models)),
 		client:    config.Client,
 		keyIndex:  make(map[string]int),
 	}
@@ -80,8 +79,11 @@ func New(config Config) (*Server, error) {
 		if route.Model == "" || route.Provider == "" {
 			return nil, errors.New("api: model and provider are required")
 		}
-		server.models[route.Model] = route.Provider
+		server.models = append(server.models, route)
 	}
+	sort.SliceStable(server.models, func(i, j int) bool {
+		return server.models[i].Priority < server.models[j].Priority
+	})
 	return server, nil
 }
 
@@ -115,47 +117,41 @@ func (s *Server) chatCompletions(writer http.ResponseWriter, request *http.Reque
 		}
 	}
 
-	providerName, ok := s.providerForModel(input.Model)
-	if !ok {
-		writeAPIError(writer, http.StatusNotFound, fmt.Sprintf("no provider configured for model %q", input.Model))
+	if input.Model != ArgusModel {
+		writeAPIError(writer, http.StatusBadRequest, fmt.Sprintf("model must be %q", ArgusModel))
 		return
 	}
-	provider, ok := s.providers[providerName]
-	if !ok {
-		writeAPIError(writer, http.StatusServiceUnavailable, fmt.Sprintf("provider %q has no available keys", providerName))
-		return
-	}
-	key := s.nextKey(provider)
 
-	var response schema.ChatCompletionResponse
-	var status int
-	var err error
-	switch provider.Style {
-	case StyleGemini:
-		response, status, err = s.callGemini(request, provider, key, input)
-	case StyleOpenAI:
-		response, status, err = s.callOpenAI(request, provider, key, input)
-	}
-	if err != nil {
-		writeAPIError(writer, status, err.Error())
-		return
-	}
-	if response.Model == "" {
-		response.Model = input.Model
-	}
-	writeJSON(writer, http.StatusOK, response)
-}
-
-func (s *Server) providerForModel(model string) (string, bool) {
-	if provider, ok := s.models[model]; ok {
-		return provider, true
-	}
-	for pattern, provider := range s.models {
-		if strings.HasPrefix(pattern, "*") && strings.HasSuffix(model, strings.TrimPrefix(pattern, "*")) {
-			return provider, true
+	errors := make([]string, 0, len(s.models))
+	for _, route := range s.models {
+		provider, ok := s.providers[route.Provider]
+		if !ok {
+			errors = append(errors, route.Provider+" has no keys")
+			continue
 		}
+		key := s.nextKey(provider)
+		internalInput := input
+		internalInput.Model = route.Model
+		var response schema.ChatCompletionResponse
+		var err error
+		switch provider.Style {
+		case StyleGemini:
+			response, _, err = s.callGemini(request, provider, key, internalInput)
+		case StyleOpenAI:
+			response, _, err = s.callOpenAI(request, provider, key, internalInput)
+		}
+		if err == nil {
+			response.Model = ArgusModel
+			writeJSON(writer, http.StatusOK, response)
+			return
+		}
+		errors = append(errors, fmt.Sprintf("%s/%s: %v", route.Provider, route.Model, err))
 	}
-	return "", false
+	if len(errors) == 0 {
+		writeAPIError(writer, http.StatusServiceUnavailable, "no configured models are available")
+		return
+	}
+	writeAPIError(writer, http.StatusServiceUnavailable, "all configured models failed: "+strings.Join(errors, "; "))
 }
 
 func (s *Server) nextKey(provider Provider) string {

@@ -14,7 +14,7 @@ type Converter interface {
 	ToNative(req schema.ChatCompletionRequest) (any, error)
 
 	// FromNative parses a provider's raw native response body and
-	// translates it into Hydra's unified response shape.
+	// translates it into Argus's unified response shape.
 	FromNative(body []byte) (schema.ChatCompletionResponse, error)
 }
 

@@ -65,6 +65,14 @@ func OpenDefault() (*Store, error) {
 	return Open(path, password)
 }
 
+func OpenWithPassword(password string) (*Store, error) {
+	path, err := DefaultPath()
+	if err != nil {
+		return nil, err
+	}
+	return Open(path, password)
+}
+
 // Open loads and decrypts the store from path.
 func Open(path, password string) (*Store, error) {
 	s := &Store{path: path, password: password, d: emptyData()}
@@ -360,7 +368,7 @@ func hasPrefix(s, prefix string) bool {
 }
 
 // Path returns the file path this store is backed by, mainly for CLI
-// output like "stored at ~/.hydra/store.json".
+// output like "stored at ~/.argus/store.json".
 func (s *Store) Path() string {
 	return s.path
 }

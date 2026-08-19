@@ -53,7 +53,7 @@ var keysListCmd = &cobra.Command{
 
 		keys := s.ListKeys(listKeysProvider)
 		if len(keys) == 0 {
-			fmt.Println("No keys connected yet. Add one with: hydra keys add <provider> <key>")
+			fmt.Println("No keys connected yet. Add one with: argus keys add <provider> <key>")
 			return nil
 		}
 
