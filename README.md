@@ -70,27 +70,32 @@ You must type `DELETE` to confirm. This operation permanently removes the encryp
 
 ## Add API Keys
 
-API keys are stored encrypted locally. The key is passed as an argument, so prefer an environment variable to avoid placing the raw key directly in shell history:
+API keys are entered through hidden terminal input and are stored encrypted locally:
 
 ```bash
-export GEMINI_API_KEY="your-gemini-key"
-Argus keys add gemini "$GEMINI_API_KEY"
+Argus keys add gemini
 ```
 
-OpenAI-compatible providers use the same command pattern:
+Argus prompts for `Enter API key:`. The characters are not displayed. The same command works for all supported providers:
 
 ```bash
-export GROQ_API_KEY="your-groq-key"
-Argus keys add groq "$GROQ_API_KEY"
-
-export MISTRAL_API_KEY="your-mistral-key"
-Argus keys add mistral "$MISTRAL_API_KEY"
+Argus keys add groq
+Argus keys add mistral
+Argus keys add cerebras
+Argus keys add openrouter
+Argus keys add zhipu
 ```
 
 Add an optional label:
 
 ```bash
-Argus keys add gemini "$GEMINI_API_KEY" --label "personal account"
+Argus keys add gemini --label "personal account"
+```
+
+Configure every supported provider in one wizard. Press `Enter` without entering a key to skip a provider:
+
+```bash
+Argus full-setup
 ```
 
 List connected keys. Keys are masked in output:
@@ -208,7 +213,7 @@ The response uses the unified OpenAI-compatible structure, including:
 - `choices`
 - `usage`
 
-The returned `model` is normalized to `argus`, even though an internal provider model handled the request.
+The request must use `model: "argus"`. The response reports the actual internal model that successfully answered, for example `gemini-2.5-flash` or `llama-3.1-8b-instant`.
 
 ## Usage Statistics
 
@@ -231,6 +236,39 @@ Filter statistics by provider:
 ```bash
 Argus stats --period day --provider gemini
 ```
+
+## Command Reference
+
+Show help for all commands:
+
+```bash
+Argus --help
+Argus <command> --help
+```
+
+Available commands:
+
+| Command | Description |
+| --- | --- |
+| `Argus full-setup` | Prompt for keys for every supported provider. |
+| `Argus keys add <provider>` | Securely prompt for and save one provider key. |
+| `Argus keys list` | List masked keys. |
+| `Argus keys list --provider <provider>` | List keys for one provider. |
+| `Argus priority <provider> <model> <number>` | Set model priority. Lower numbers are tried first. |
+| `Argus pause <provider>` | Pause all models for a provider. |
+| `Argus pause <provider> --model <model>` | Pause one model. |
+| `Argus resume <provider>` | Resume all models for a provider. |
+| `Argus resume <provider> --model <model>` | Resume one model. |
+| `Argus stats --period day` | Show current-day stored counters. |
+| `Argus stats --period month` | Show current-month stored counters. |
+| `Argus serve` | Run the gateway in the foreground. |
+| `Argus serve --port <port>` | Run on a custom port. |
+| `Argus serve --background` | Run as a detached background process. |
+| `Argus status` | Check the background server status. |
+| `Argus stop` | Stop the background server. |
+| `Argus reset` | Delete the encrypted store and all saved settings. |
+
+`Argus reset` is destructive and requires typing `DELETE`. It is the recovery path when the encryption password is forgotten, but all saved API keys and settings will be lost.
 
 ## Development
 
