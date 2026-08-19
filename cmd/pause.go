@@ -27,7 +27,7 @@ var resumeCmd = &cobra.Command{
 }
 
 func setPaused(provider, model string, paused bool) error {
-	s, err := Open(provider)
+	s, err := OpenDefault()
 	if err != nil {
 		return err
 	}

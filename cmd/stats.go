@@ -26,7 +26,7 @@ var statsCmd = &cobra.Command{
 			return fmt.Errorf("--period must be \"day\" or \"month\", got %q", statsPeriod)
 		}
 
-		s, err := Open(statsProvider)
+		s, err := OpenDefault()
 		if err != nil {
 			return err
 		}

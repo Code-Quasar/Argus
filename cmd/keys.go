@@ -22,7 +22,7 @@ var keysAddCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		provider, key := args[0], args[1]
 
-		s, err := Open(provider)
+		s, err := OpenDefault()
 		if err != nil {
 			return err
 		}
@@ -46,7 +46,7 @@ var keysListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List connected keys, when they were added, and how many per provider",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		s, err := Open(listKeysProvider)
+		s, err := OpenDefault()
 		if err != nil {
 			return err
 		}

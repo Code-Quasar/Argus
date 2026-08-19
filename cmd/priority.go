@@ -18,7 +18,7 @@ var priorityCmd = &cobra.Command{
 			return fmt.Errorf("priority must be an integer, got %q", args[2])
 		}
 
-		s, err := Open(provider)
+		s, err := OpenDefault()
 		if err != nil {
 			return err
 		}

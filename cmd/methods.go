@@ -19,6 +19,15 @@ type Store struct {
 	d    data
 }
 
+// OpenDefault opens the store used by all CLI commands.
+func OpenDefault() (*Store, error) {
+	path, err := DefaultPath()
+	if err != nil {
+		return nil, err
+	}
+	return Open(path)
+}
+
 // Open loads the store from path, creating an empty one if the file
 // doesn't exist yet.
 func Open(path string) (*Store, error) {
