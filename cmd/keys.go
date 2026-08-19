@@ -16,11 +16,15 @@ var keysCmd = &cobra.Command{
 var addKeyLabel string
 
 var keysAddCmd = &cobra.Command{
-	Use:   "add <provider> <key>",
+	Use:   "add <provider>",
 	Short: "Add an API key for a provider (gemini, groq, cerebras, mistral, ...)",
-	Args:  cobra.ExactArgs(2),
+	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		provider, key := args[0], args[1]
+		provider := args[0]
+		key, err := readPassword("Enter API key: ")
+		if err != nil {
+			return err
+		}
 
 		s, err := OpenDefault()
 		if err != nil {
@@ -53,7 +57,7 @@ var keysListCmd = &cobra.Command{
 
 		keys := s.ListKeys(listKeysProvider)
 		if len(keys) == 0 {
-			fmt.Println("No keys connected yet. Add one with: argus keys add <provider> <key>")
+			fmt.Println("No keys connected yet. Add one with: Argus keys add <provider>")
 			return nil
 		}
 
